@@ -13,10 +13,53 @@ st.set_page_config(
     layout="wide"
 )
 
-# Main Heading
+# ---------------- Company Logo ----------------
+st.image("tachyon_logo.jpeg", width=180)
+
+# ---------------- Sidebar ----------------
+st.sidebar.title("📚 About Project")
+
+st.sidebar.markdown("""
+### Turf Booking Knowledge Assistant
+
+This application allows users to:
+
+- 📄 Upload a Turf Booking PDF
+- ✂️ Split the document into chunks
+- 🧠 Generate embeddings
+- 💾 Store embeddings in ChromaDB
+- ❓ Ask questions about the document
+- 🔍 Retrieve relevant information using semantic search
+
+---
+### 🛠 Technologies Used
+
+- Streamlit
+- LangChain
+- PyPDFLoader
+- Hugging Face Embeddings
+- ChromaDB
+
+---
+### 📌 Instructions
+
+1. Upload a Turf Booking PDF.
+2. Wait until processing is complete.
+3. Enter your question.
+4. Click **Ask** to retrieve information.
+""")
+
+# ---------------- Main Page ----------------
+
 st.title("📚 Turf Booking Knowledge Assistant")
 
-st.write("Upload a Turf Booking PDF and ask questions about its contents.")
+st.markdown("""
+### AI-Powered PDF Question Answering System
+
+Upload a Turf Booking PDF, process it using **RAG (Retrieval-Augmented Generation)**, and ask questions to retrieve relevant information from the document.
+""")
+
+st.divider()
 
 # Upload PDF
 uploaded_file = st.file_uploader(
@@ -27,51 +70,59 @@ uploaded_file = st.file_uploader(
 # Initialize embeddings variable
 embeddings = None
 
+# Initialize chat history
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
+
 if uploaded_file is not None:
-    # Create uploads folder if it doesn't exist
-    os.makedirs("uploads", exist_ok=True)
 
-    # Save uploaded PDF
-    file_path = os.path.join("uploads", uploaded_file.name)
+    with st.spinner("📄 Processing PDF... Please wait..."):
 
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+        os.makedirs("uploads", exist_ok=True)
 
-    st.success(f"File uploaded successfully: {uploaded_file.name}")
+        file_path = os.path.join("uploads", uploaded_file.name)
 
-    # Load the PDF
-    loader = PyPDFLoader(file_path)
-    documents = loader.load()
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
 
-    # Display total pages
-    st.write(f"Total Pages: {len(documents)}")
+        loader = PyPDFLoader(file_path)
+        documents = loader.load()
 
-    # Split the document into chunks
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100
-    )
+        # PDF Information
+        file_name = uploaded_file.name
+        file_size = round(uploaded_file.size / 1024, 2)
+        total_pages = len(documents)
 
-    chunks = text_splitter.split_documents(documents)
+        # Split the document into chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=100
+        )
 
-    # Display total chunks
-    st.write(f"Total Chunks: {len(chunks)}")
+        chunks = text_splitter.split_documents(documents)
 
-    # Create embedding model
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+        # Create embedding model
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
 
-    st.success("Embedding model loaded successfully.")
+        # Save chunks into ChromaDB
+        vector_db = Chroma.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            persist_directory="chroma_db"
+        )
 
-    # Save chunks into ChromaDB
-    vector_db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory="chroma_db"
-    )
+    # Display information after processing
+    st.success(f"✅ File uploaded successfully: {file_name}")
 
-    st.success("Documents saved to ChromaDB successfully.")
+    st.write(f"📄 File Name: {file_name}")
+    st.write(f"📏 File Size: {file_size} KB")
+    st.write(f"📃 Total Pages: {total_pages}")
+    st.write(f"📦 Total Chunks: {len(chunks)}")
+
+    st.success("✅ Embedding model loaded successfully.")
+    st.success("✅ Documents saved to ChromaDB successfully.")
 
 # Question Box
 question = st.text_input(
@@ -100,17 +151,82 @@ if st.button("Ask"):
             k=1
         )
 
+        # Check if any result is returned
         if not results:
-            st.error("Information not found.")
+            st.error("❌ Information Not Found")
+
+            st.info("""
+We couldn't find a relevant answer in the uploaded PDF.
+
+Try the following:
+• Ask your question using different words.
+• Use keywords available in the PDF.
+• Make sure the uploaded PDF contains the required information.
+""")
+
         else:
             best_doc, score = results[0]
 
-    
-            
-
             # Check whether the answer is relevant
             if score < 0.10:
-                st.error("Information not found.")
+                st.error("❌ Information Not Found")
+
+                st.info("""
+We couldn't find a relevant answer in the uploaded PDF.
+
+Try the following:
+• Ask your question using different words.
+• Use keywords available in the PDF.
+• Make sure the uploaded PDF contains the required information.
+""")
+
             else:
-                st.subheader("Answer")
-                st.write(best_doc.page_content)
+                # Better Answer Card
+                with st.container(border=True):
+                    st.subheader("🤖 AI Answer")
+                    st.markdown(best_doc.page_content)
+
+                    # Display Source Page Number
+                    page_number = best_doc.metadata.get("page", 0) + 1
+                    st.caption(f"📄 Source Page: {page_number}")
+
+                # Save Chat History
+                st.session_state["chat_history"].append({
+                    "question": question,
+                    "answer": best_doc.page_content,
+                    "page": page_number
+                })
+
+        # Clear Chat Button
+if st.button("🗑️ Clear Chat"):
+    st.session_state["chat_history"] = []
+    st.success("Chat history cleared successfully!")
+
+        # ---------------- Chat History ----------------
+
+if st.session_state["chat_history"]:
+
+    st.divider()
+    st.subheader("💬 Chat History")
+
+    for i, chat in enumerate(st.session_state["chat_history"], start=1):
+
+        with st.expander(f"Question {i}: {chat['question']}"):
+
+            st.write(chat["answer"])
+            st.caption(f"📄 Source Page: {chat['page']}")
+
+
+    st.divider()
+
+st.markdown("""
+<div style='text-align: center; color: gray; font-size: 14px;'>
+
+Developed by <b>Sai Tejaswini</b><br><br>
+
+📚 Turf Booking Knowledge Assistant<br>
+
+Built with ❤️ using Streamlit • LangChain • Hugging Face • ChromaDB
+
+</div>
+""", unsafe_allow_html=True)
